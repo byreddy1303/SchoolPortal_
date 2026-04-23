@@ -5,6 +5,7 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  VITE_SESSION_TIMEOUT_MINUTES = "15"
 
 [[redirects]]
   from = "/*"

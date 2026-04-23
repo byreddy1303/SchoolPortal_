@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: school-portal-config
+  namespace: school-portal
+data:
+  ACCESS_TOKEN_EXPIRE_MINUTES: "720"
+  DEFAULT_ADMIN_USERNAME: "admin"
+  BACKEND_CORS_ORIGINS: "https://your-netlify-site.netlify.app"

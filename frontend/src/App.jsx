@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ClassSectionBrowser, { emptyClassSectionFilters } from "./components/ClassSectionBrowser";
 import ChangePasswordForm from "./components/ChangePasswordForm";
 import LoginForm from "./components/LoginForm";
@@ -23,11 +23,28 @@ import {
 import { PORTAL_NAME, PORTAL_TAGLINE, SCHOOL_NAME } from "./lib/branding";
 
 const SESSION_KEY = "school-portal-session";
+const SESSION_TIMEOUT_MINUTES = Number(import.meta.env.VITE_SESSION_TIMEOUT_MINUTES || 15);
+const SESSION_TIMEOUT_MS = Math.max(1, SESSION_TIMEOUT_MINUTES) * 60 * 1000;
+
+function isSessionExpired(session) {
+  if (!session?.lastActivityAt) {
+    return true;
+  }
+  return Date.now() - Number(session.lastActivityAt) >= SESSION_TIMEOUT_MS;
+}
 
 function loadSession() {
   try {
     const raw = window.localStorage.getItem(SESSION_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) {
+      return null;
+    }
+    const session = JSON.parse(raw);
+    if (!session?.token || isSessionExpired(session)) {
+      window.localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    return session;
   } catch {
     return null;
   }
@@ -198,6 +215,25 @@ export default function App() {
   const [savingStudent, setSavingStudent] = useState(false);
   const [paymentError, setPaymentError] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
+  const sessionTimeoutRef = useRef(null);
+
+  function clearSessionTimeout() {
+    if (sessionTimeoutRef.current !== null) {
+      window.clearTimeout(sessionTimeoutRef.current);
+      sessionTimeoutRef.current = null;
+    }
+  }
+
+  function touchSessionActivity() {
+    setSession((current) => {
+      if (!current?.token) {
+        return current;
+      }
+      const nextSession = { ...current, lastActivityAt: Date.now() };
+      saveSession(nextSession);
+      return nextSession;
+    });
+  }
 
   useEffect(() => {
     if (!session?.token) {
@@ -259,7 +295,7 @@ export default function App() {
     setAuthError("");
     try {
       const result = await login(credentials);
-      const nextSession = { token: result.access_token, user: result.user };
+      const nextSession = { token: result.access_token, user: result.user, lastActivityAt: Date.now() };
       setSession(nextSession);
       setUser(result.user);
       saveSession(nextSession);
@@ -271,6 +307,7 @@ export default function App() {
   }
 
   function handleLogout() {
+    clearSessionTimeout();
     setSession(null);
     setUser(null);
     setActiveStudentId(null);
@@ -288,6 +325,50 @@ export default function App() {
     setClassSectionError("");
     saveSession(null);
   }
+
+  useEffect(() => {
+    if (!session?.token) {
+      clearSessionTimeout();
+      return;
+    }
+
+    if (isSessionExpired(session)) {
+      handleLogout();
+      return;
+    }
+
+    const remainingMs = SESSION_TIMEOUT_MS - (Date.now() - Number(session.lastActivityAt));
+    sessionTimeoutRef.current = window.setTimeout(() => {
+      handleLogout();
+    }, Math.max(0, remainingMs));
+
+    return () => {
+      clearSessionTimeout();
+    };
+  }, [session]);
+
+  useEffect(() => {
+    if (!session?.token) {
+      return;
+    }
+
+    const activityEvents = ["mousemove", "keydown", "click", "scroll", "touchstart"];
+    let lastTouchMs = Date.now();
+    const handleActivity = () => {
+      const now = Date.now();
+      if (now - lastTouchMs < 5000) {
+        return;
+      }
+      lastTouchMs = now;
+      touchSessionActivity();
+    };
+
+    activityEvents.forEach((eventName) => window.addEventListener(eventName, handleActivity, { passive: true }));
+
+    return () => {
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, handleActivity));
+    };
+  }, [session?.token]);
 
   async function handleSearch(filters = searchFilters) {
     if (!session?.token) {
