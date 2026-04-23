@@ -1,47 +1,61 @@
 const API_BASE = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 
+function getBackendUnavailableMessage() {
+  return "Backend API is not reachable. Deploy the FastAPI backend and set VITE_API_URL to that backend /api URL.";
+}
+
+async function getErrorMessage(response) {
+  const contentType = response.headers.get("Content-Type") || "";
+
+  if (contentType.includes("text/html")) {
+    return getBackendUnavailableMessage();
+  }
+
+  try {
+    const data = await response.json();
+    return data.detail || "Something went wrong";
+  } catch {
+    return response.statusText || "Something went wrong";
+  }
+}
+
 async function request(path, { method = "GET", token, body } = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
-    },
-    body: body ? JSON.stringify(body) : undefined
-  });
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
+  } catch {
+    throw new Error(getBackendUnavailableMessage());
+  }
 
   if (!response.ok) {
-    let message = "Something went wrong";
-    try {
-      const data = await response.json();
-      message = data.detail || message;
-    } catch {
-      message = response.statusText || message;
-    }
-    throw new Error(message);
+    throw new Error(await getErrorMessage(response));
   }
 
   return response.json();
 }
 
-function getErrorMessageFromResponse(response) {
-  return response
-    .clone()
-    .json()
-    .then((data) => data.detail || "Something went wrong")
-    .catch(() => response.statusText || "Something went wrong");
-}
-
 async function downloadFile(path, token, fallbackFilename) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: "GET",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
-    }
-  });
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method: "GET",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      }
+    });
+  } catch {
+    throw new Error(getBackendUnavailableMessage());
+  }
 
   if (!response.ok) {
-    throw new Error(await getErrorMessageFromResponse(response));
+    throw new Error(await getErrorMessage(response));
   }
 
   const disposition = response.headers.get("Content-Disposition") || "";
@@ -78,6 +92,21 @@ export function searchStudents(token, filters) {
 
 export function getStudent(token, id) {
   return request(`/students/${id}`, { token });
+}
+
+export function getClassSectionOptions(token) {
+  return request("/students/class-sections", { token });
+}
+
+export function getStudentsByClassSection(token, filters) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value);
+    }
+  });
+
+  return request(`/students/by-class-section?${params.toString()}`, { token });
 }
 
 export function createStudent(token, payload) {

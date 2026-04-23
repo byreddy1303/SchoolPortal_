@@ -29,7 +29,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -39,7 +40,8 @@ button:disabled {
   transform: none;
 }
 
-input {
+input,
+select {
   width: 100%;
   padding: 0.92rem 1rem;
   border: 1px solid var(--stroke);
@@ -49,7 +51,8 @@ input {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-input:focus {
+input:focus,
+select:focus {
   outline: none;
   border-color: rgba(184, 92, 56, 0.5);
   box-shadow: 0 0 0 4px rgba(184, 92, 56, 0.12);
@@ -452,6 +455,27 @@ p {
   color: var(--muted);
 }
 
+.result-card-stack,
+.result-card-side {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.result-card-side {
+  justify-items: end;
+  text-align: right;
+}
+
+.pending-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.38rem 0.72rem;
+  border-radius: 999px;
+  background: rgba(31, 58, 95, 0.08);
+  color: var(--primary) !important;
+  font-weight: 700;
+}
+
 .result-card.active {
   border-color: rgba(107, 66, 38, 0.22);
   background:
@@ -739,5 +763,10 @@ p {
   .student-banner-side {
     min-width: 0;
     justify-items: stretch;
+  }
+
+  .result-card-side {
+    justify-items: start;
+    text-align: left;
   }
 }

@@ -161,6 +161,18 @@ class StudentListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ClassSectionOption(BaseModel):
+    academic_year: str
+    class_name: str
+    section: str
+
+
+class StudentDueListItem(StudentListItem):
+    total_pending: Decimal
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class StudentRead(BaseModel):
     id: int
     academic_year: str

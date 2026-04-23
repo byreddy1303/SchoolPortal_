@@ -14,8 +14,10 @@ from app.models.payment import PaymentAllocation, PaymentTransaction
 from app.models.student import Student
 from app.models.user import User
 from app.schemas.student import (
+    ClassSectionOption,
     PaymentTransactionCreate,
     StudentCreate,
+    StudentDueListItem,
     StudentListItem,
     StudentRead,
     StudentUpdate,
@@ -93,6 +95,21 @@ def to_student_list_item(student: Student) -> StudentListItem:
         section=student.section,
         mobile_number=student.mobile_number,
         updated_at=student.updated_at,
+    )
+
+
+def to_student_due_list_item(student: Student) -> StudentDueListItem:
+    fee_summary = build_fee_summary(student)
+    return StudentDueListItem(
+        id=student.id,
+        academic_year=student.academic_year,
+        admission_number=student.admission_number,
+        student_name=student.student_name,
+        class_name=student.class_name,
+        section=student.section,
+        mobile_number=student.mobile_number,
+        updated_at=student.updated_at,
+        total_pending=fee_summary.total_pending,
     )
 
 
@@ -225,6 +242,55 @@ def list_students(
 
     students = query.order_by(Student.student_name.asc()).limit(MAX_STUDENT_SEARCH_RESULTS).all()
     return [to_student_list_item(student) for student in students]
+
+
+@router.get("/class-sections", response_model=list[ClassSectionOption])
+def list_class_sections(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[ClassSectionOption]:
+    rows = (
+        db.query(Student.academic_year, Student.class_name, Student.section)
+        .distinct()
+        .order_by(Student.academic_year.desc(), Student.class_name.asc(), Student.section.asc())
+        .all()
+    )
+    return [
+        ClassSectionOption(
+            academic_year=academic_year,
+            class_name=class_name,
+            section=section,
+        )
+        for academic_year, class_name, section in rows
+    ]
+
+
+@router.get("/by-class-section", response_model=list[StudentDueListItem])
+def list_students_by_class_section(
+    class_name: str = Query(min_length=1),
+    section: str = Query(min_length=1),
+    academic_year: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[StudentDueListItem]:
+    query = (
+        db.query(Student)
+        .options(selectinload(Student.payment_transactions).selectinload(PaymentTransaction.allocations))
+        .filter(Student.class_name == class_name, Student.section == section)
+    )
+    if academic_year:
+        query = query.filter(Student.academic_year == academic_year)
+
+    students = query.limit(MAX_STUDENT_SEARCH_RESULTS).all()
+    items = [to_student_due_list_item(student) for student in students]
+    items.sort(
+        key=lambda item: (
+            -item.total_pending,
+            item.student_name.casefold(),
+            item.admission_number.casefold(),
+        )
+    )
+    return items
 
 
 @router.post("", response_model=StudentRead, status_code=status.HTTP_201_CREATED)

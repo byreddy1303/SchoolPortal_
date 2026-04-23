@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ClassSectionBrowser, { emptyClassSectionFilters } from "./components/ClassSectionBrowser";
 import ChangePasswordForm from "./components/ChangePasswordForm";
 import LoginForm from "./components/LoginForm";
 import StudentDetails from "./components/StudentDetails";
@@ -10,8 +11,10 @@ import {
   downloadPaymentReceipt,
   downloadStudentPaymentHistory,
   downloadStudentStatement,
+  getClassSectionOptions,
   getCurrentUser,
   getStudent,
+  getStudentsByClassSection,
   login,
   recordPayment,
   searchStudents,
@@ -75,6 +78,19 @@ function matchesSearchFilters(student, filters) {
   return true;
 }
 
+function matchesClassSectionFilters(student, filters) {
+  if (filters.academic_year && normalizeText(student.academic_year) !== normalizeText(filters.academic_year)) {
+    return false;
+  }
+  if (filters.class_name && normalizeText(student.class_name) !== normalizeText(filters.class_name)) {
+    return false;
+  }
+  if (filters.section && normalizeText(student.section) !== normalizeText(filters.section)) {
+    return false;
+  }
+  return true;
+}
+
 function toStudentListItem(student) {
   return {
     id: student.id,
@@ -88,10 +104,40 @@ function toStudentListItem(student) {
   };
 }
 
+function toStudentDueListItem(student) {
+  return {
+    id: student.id,
+    academic_year: student.academic_year,
+    admission_number: student.admission_number,
+    student_name: student.student_name,
+    class_name: student.class_name,
+    section: student.section,
+    mobile_number: student.mobile_number,
+    total_pending: student.fee_summary.total_pending,
+    updated_at: student.updated_at
+  };
+}
+
 function upsertStudent(results, student) {
   const nextItem = toStudentListItem(student);
   const otherStudents = results.filter((item) => item.id !== nextItem.id);
   return [nextItem, ...otherStudents].sort((left, right) => left.student_name.localeCompare(right.student_name));
+}
+
+function sortByPendingDue(results) {
+  return [...results].sort((left, right) => {
+    const dueDifference = Number(right.total_pending || 0) - Number(left.total_pending || 0);
+    if (dueDifference !== 0) {
+      return dueDifference;
+    }
+
+    const nameDifference = left.student_name.localeCompare(right.student_name);
+    if (nameDifference !== 0) {
+      return nameDifference;
+    }
+
+    return left.admission_number.localeCompare(right.admission_number);
+  });
 }
 
 function syncStudentWithSearchResults(results, student, filters) {
@@ -101,6 +147,15 @@ function syncStudentWithSearchResults(results, student, filters) {
     return otherStudents;
   }
   return upsertStudent(results, student);
+}
+
+function syncStudentWithClassSectionResults(results, student, filters) {
+  const nextItem = toStudentDueListItem(student);
+  const otherStudents = results.filter((item) => item.id !== nextItem.id);
+  if (!matchesClassSectionFilters(nextItem, filters)) {
+    return sortByPendingDue(otherStudents);
+  }
+  return sortByPendingDue([nextItem, ...otherStudents]);
 }
 
 function downloadBlobToBrowser({ blob, filename }) {
@@ -120,6 +175,13 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
   const [searchFilters, setSearchFilters] = useState(emptySearchFilters);
+  const [classSectionFilters, setClassSectionFilters] = useState(emptyClassSectionFilters);
+  const [classSectionOptions, setClassSectionOptions] = useState([]);
+  const [classSectionOptionsLoading, setClassSectionOptionsLoading] = useState(false);
+  const [classSectionResults, setClassSectionResults] = useState([]);
+  const [classSectionLoading, setClassSectionLoading] = useState(false);
+  const [classSectionError, setClassSectionError] = useState("");
+  const [hasBrowsedClassSection, setHasBrowsedClassSection] = useState(false);
   const [searchResults, setSearchResults] = useState([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -160,6 +222,38 @@ export default function App() {
     };
   }, [session?.token]);
 
+  useEffect(() => {
+    if (!session?.token) {
+      return;
+    }
+
+    let ignore = false;
+    setClassSectionOptionsLoading(true);
+    setClassSectionError("");
+
+    getClassSectionOptions(session.token)
+      .then((options) => {
+        if (!ignore) {
+          setClassSectionOptions(options);
+        }
+      })
+      .catch((error) => {
+        if (!ignore) {
+          setClassSectionOptions([]);
+          setClassSectionError(error.message);
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setClassSectionOptionsLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [session?.token]);
+
   async function handleLogin(credentials) {
     setAuthLoading(true);
     setAuthError("");
@@ -187,6 +281,11 @@ export default function App() {
     setPasswordError("");
     setSearchResults([]);
     setHasSearched(false);
+    setClassSectionFilters(emptyClassSectionFilters());
+    setClassSectionOptions([]);
+    setClassSectionResults([]);
+    setHasBrowsedClassSection(false);
+    setClassSectionError("");
     saveSession(null);
   }
 
@@ -211,6 +310,38 @@ export default function App() {
     }
   }
 
+  function handleClassSectionFilterChange(nextFilters) {
+    setClassSectionFilters(nextFilters);
+    setClassSectionResults([]);
+    setHasBrowsedClassSection(false);
+    setClassSectionError("");
+  }
+
+  async function handleBrowseClassSection(filters = classSectionFilters) {
+    if (!session?.token) {
+      return;
+    }
+
+    if (!filters.class_name || !filters.section) {
+      setClassSectionResults([]);
+      setHasBrowsedClassSection(false);
+      return;
+    }
+
+    setClassSectionLoading(true);
+    setClassSectionError("");
+    setHasBrowsedClassSection(true);
+    try {
+      const students = await getStudentsByClassSection(session.token, filters);
+      setClassSectionResults(students);
+    } catch (error) {
+      setClassSectionResults([]);
+      setClassSectionError(error.message);
+    } finally {
+      setClassSectionLoading(false);
+    }
+  }
+
   async function handleStudentSave(form) {
     if (!session?.token) {
       return null;
@@ -230,6 +361,12 @@ export default function App() {
       if (hasSearched) {
         setSearchResults((current) => syncStudentWithSearchResults(current, student, searchFilters));
       }
+      if (hasBrowsedClassSection) {
+        setClassSectionResults((current) => syncStudentWithClassSectionResults(current, student, classSectionFilters));
+      }
+      getClassSectionOptions(session.token)
+        .then((options) => setClassSectionOptions(options))
+        .catch((error) => setClassSectionError(error.message));
       return student;
     } catch (error) {
       setSaveError(error.message);
@@ -276,6 +413,9 @@ export default function App() {
       setSelectedStudent(student);
       if (hasSearched) {
         setSearchResults((current) => syncStudentWithSearchResults(current, student, searchFilters));
+      }
+      if (hasBrowsedClassSection) {
+        setClassSectionResults((current) => syncStudentWithClassSectionResults(current, student, classSectionFilters));
       }
       return student;
     } catch (error) {
@@ -437,6 +577,20 @@ export default function App() {
               </button>
             </div>
           </section>
+
+          <ClassSectionBrowser
+            filters={classSectionFilters}
+            onFilterChange={handleClassSectionFilterChange}
+            onBrowse={() => handleBrowseClassSection(classSectionFilters)}
+            onSelect={handleSelectStudent}
+            options={classSectionOptions}
+            optionsLoading={classSectionOptionsLoading}
+            results={classSectionResults}
+            hasBrowsed={hasBrowsedClassSection}
+            loading={classSectionLoading}
+            error={classSectionError}
+            selectedStudentId={activeStudentId}
+          />
 
           <StudentSearch
             filters={searchFilters}
